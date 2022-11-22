@@ -108,4 +108,40 @@ app.post('/jobs/:job_id/pay', getProfile , async (req, res) =>{
     }
 });
 
+app.post('/balances/deposit/:userId', getProfile , async (req, res) =>{
+    const {Profile, Contract, Job} = req.app.get('models');
+    const isNotTerminated = 'terminated';
+    const {userId} = req.params;
+    const {depositAmount} = req.body;
+    if (req.profile.status === isNotTerminated) return res.status(404).end();
+    const t = await sequelize.transaction();
+    try {
+        const profile = await Profile.findOne({
+            where: {
+                id: userId
+            },
+            include: [{
+                model: Contract,
+                as: 'Client',
+                include: [{
+                    model: Job,
+                }]
+            }]
+        });
+        if(!profile) return res.status(404).end();
+
+        // deposit balance
+        const totalJobsToPay = profile.Client.map((client) => client.Jobs.reduce((acc, obj) => acc + obj.price, 0)).reduce((c, v) => c + v, 0);
+        if ((25 / 100 * depositAmount) + depositAmount > totalJobsToPay) return res.status(400).end('Can not deposite more than 25%');
+        
+        profile.balance += depositAmount;
+        await profile.save({ transaction: t });
+        await t.commit();
+        res.json(profile);
+    } catch (error) {
+        console.error(error);
+        await t.rollback();
+    }
+});
+
 module.exports = app;
