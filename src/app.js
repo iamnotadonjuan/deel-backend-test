@@ -110,10 +110,8 @@ app.post('/jobs/:job_id/pay', getProfile , async (req, res) =>{
 
 app.post('/balances/deposit/:userId', getProfile , async (req, res) =>{
     const {Profile, Contract, Job} = req.app.get('models');
-    const isNotTerminated = 'terminated';
     const {userId} = req.params;
     const {depositAmount} = req.body;
-    if (req.profile.status === isNotTerminated) return res.status(404).end();
     const t = await sequelize.transaction();
     try {
         const profile = await Profile.findOne({
@@ -141,6 +139,44 @@ app.post('/balances/deposit/:userId', getProfile , async (req, res) =>{
     } catch (error) {
         console.error(error);
         await t.rollback();
+    }
+});
+
+app.get('/admin/best-profession', getProfile , async (req, res) =>{
+
+    //contractor jobs paid
+    const {Profile, Contract, Job} = req.app.get('models');
+    const {start,end} = req.query;
+    const isNotAClient = 'client';
+    if (!start && !end) return res.status(400).end();
+    try {
+        const bestProfession = await Profile.findAll({
+            where: {
+                type: { [Op.not]: isNotAClient }
+            },
+            include: [{
+                model: Contract,
+                as: 'Contractor',
+                include: [{
+                    model: Job,
+                    where: {
+                        paid: 1,
+                        paymentDate: { [Op.between]: [start, end] }
+                    }
+                }]
+            }]
+        });
+        const totalJobsToPay = bestProfession.map((bestP => ({
+            ...bestP.dataValues,
+            totalGained: bestP.Contractor.map((client) => client.Jobs.reduce((acc, obj) => acc + obj.price, 0)).reduce((c, v) => c + v, 0)
+            })
+        )).reduce((prev, current) => (prev.totalGained > current.totalGained) ? prev : current);
+        
+        if(totalJobsToPay.Contractor.length === 0) return res.status(404).end();
+
+        res.json(totalJobsToPay);
+    } catch (error) {
+        console.error(error);
     }
 });
 
